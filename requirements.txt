@@ -1,0 +1,2 @@
+python-telegram-bot[webhooks]==21.6
+openai>=1.40
