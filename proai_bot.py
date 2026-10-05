@@ -25,8 +25,8 @@ log = logging.getLogger("proai")
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 AI_MODEL = os.environ.get("AI_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
-MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "40"))
-MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
+MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "55"))
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "5000"))
 
 ai = AsyncOpenAI(
     api_key=os.environ["AI_API_KEY"],
@@ -90,10 +90,10 @@ def build_system_prompt() -> str:
     today = datetime.date.today().strftime("%d %B %Y")
     return (
         "Tum 'ProAI' ho, ek smart aur stylish AI assistant jo Telegram pe "
-        "(@PraKrutim_bot) rehta hai. Tumhari vibe Apple Liquid Glass jaisi hai: "
+        "(@PraKrutim_bot) rehta hai. xiaomi ya kisi bhi device me madad kar sakta hai.: "
         "clean, premium aur smooth. "
         f"Aaj ki date hai {today}. "
-        "Hamesha chote, stylish aur energetic Hinglish me reply do. "
+        "Hamesha premium, stylish aur energetic Hinglish me reply do. "
         "Replies 3-4 lines me rakho jab tak user detail na maange. "
         "Emojis thode aur sahi jagah use karo. "
         "Code ya technical sawaal me seedha aur accurate jawab do."
@@ -103,7 +103,7 @@ def build_system_prompt() -> str:
 history = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 
 HELP = """<b>ProAI ✨</b>
-Private me kuch bhi poocho. Group me mujhe @mention karo ya mere message pe reply karo.
+DM me kuch bhi poocho. Group me mujhe @mention karo ya mere message pe reply karo.
 
 <b>Basic</b>
 /id /info /ping /reset /admins
