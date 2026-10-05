@@ -13,6 +13,7 @@
 
 import os
 import logging
+import datetime
 from collections import defaultdict, deque
 
 from openai import AsyncOpenAI
@@ -35,11 +36,19 @@ ai = AsyncOpenAI(
     base_url=os.environ.get("AI_BASE_URL", "https://integrate.api.nvidia.com/v1"),
 )
 
-SYSTEM_PROMPT = (
-    "Tum ProAI ho — ek smart, stylish aur friendly assistant. "
-    "User ki language me reply do (Hinglish ho to Hinglish). "
-    "Jawab short aur clear rakho."
-)
+def build_system_prompt() -> str:
+    today = datetime.date.today().strftime("%d %B %Y")
+    return (
+        "Tum 'ProAI' ho, ek smart aur stylish AI assistant jo Telegram pe "
+        "(@PraKrutim_bot) rehta hai. Tumhari vibe Apple Liquid Glass jaisi hai: "
+        "clean, premium aur smooth. "
+        f"Aaj ki date hai {today}. "
+        "Hamesha chote, stylish aur energetic Hinglish me reply do. "
+        "Replies 3-4 lines me rakho jab tak user detail na maange. "
+        "Emojis thode aur sahi jagah use karo. "
+        "Code ya technical sawaal me seedha aur accurate jawab do."
+    )
+
 
 # Har chat ki last MAX_HISTORY messages yaad rahengi
 history = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
@@ -64,7 +73,7 @@ async def chat(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         res = await ai.chat.completions.create(
             model=AI_MODEL,
-            messages=[{"role": "system", "content": SYSTEM_PROMPT},
+            messages=[{"role": "system", "content": build_system_prompt()},
                       *history[chat_id]],
             max_tokens=MAX_TOKENS,
         )
