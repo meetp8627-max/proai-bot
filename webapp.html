@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#05060f">
+<title>ProAI</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{
+  --bg:#05060f; --text:#f5f6fb; --muted:rgba(245,246,251,.62); --accent:#ff7a1a; --accent2:#7c5cff;
+  --glass:rgba(255,255,255,.075); --glass-strong:rgba(255,255,255,.13); --stroke:rgba(255,255,255,.17);
+  --shine:inset 0 1px 0 rgba(255,255,255,.38), inset 0 -1px 0 rgba(255,255,255,.05);
+  --shadow:0 10px 40px rgba(0,0,0,.45);
+  --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
+  --spring:cubic-bezier(.34,1.56,.64,1);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;overflow:hidden}
+body{display:flex;flex-direction:column}
+/* animated mesh background */
+.bg{position:fixed;inset:0;z-index:0;overflow:hidden}
+.blob{position:absolute;width:55vmax;height:55vmax;border-radius:50%;filter:blur(70px);opacity:.55;animation:float 22s ease-in-out infinite}
+.b1{background:radial-gradient(circle,#ff7a1a,transparent 65%);top:-20vmax;left:-15vmax}
+.b2{background:radial-gradient(circle,#6b4cff,transparent 65%);bottom:-22vmax;right:-18vmax;animation-delay:-8s}
+.b3{background:radial-gradient(circle,#18c6ff,transparent 65%);top:35%;left:40%;width:40vmax;height:40vmax;opacity:.32;animation-delay:-14s}
+@keyframes float{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(6vmax,4vmax) scale(1.1)}66%{transform:translate(-4vmax,7vmax) scale(.95)}}
+.glass{background:var(--glass);backdrop-filter:blur(26px) saturate(180%);-webkit-backdrop-filter:blur(26px) saturate(180%);
+  border:1px solid var(--stroke);box-shadow:var(--shine),var(--shadow)}
+/* header */
+header{position:relative;z-index:5;margin:calc(var(--sat) + 10px) 14px 0;padding:11px 14px;border-radius:22px;display:flex;align-items:center;gap:10px}
+.logo{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;font-size:18px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:var(--shine),0 4px 14px rgba(255,122,26,.4)}
+header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px}
+header small{display:block;color:var(--muted);font-size:11.5px;margin-top:-1px}
+.grow{flex:1}
+.icon-btn{width:36px;height:36px;border-radius:12px;border:1px solid var(--stroke);background:var(--glass);color:var(--text);
+  display:grid;place-items:center;font-size:16px;cursor:pointer;transition:transform .25s var(--spring)}
+.icon-btn:active{transform:scale(.88)}
+/* views */
+main{position:relative;z-index:1;flex:1;min-height:0}
+.view{position:absolute;inset:0;display:none;flex-direction:column}
+.view.on{display:flex;animation:fade .35s ease}
+@keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.scroll{flex:1;overflow-y:auto;padding:14px 14px 150px;scroll-behavior:smooth;-webkit-overflow-scrolling:touch}
+.scroll::-webkit-scrollbar{display:none}
+/* chat */
+.msg{max-width:86%;padding:10px 14px;border-radius:20px;margin:8px 0;word-wrap:break-word;animation:pop .4s var(--spring);white-space:pre-wrap}
+@keyframes pop{from{opacity:0;transform:scale(.9) translateY(10px)}to{opacity:1;transform:none}}
+.msg.bot{background:var(--glass);border:1px solid var(--stroke);box-shadow:var(--shine);border-bottom-left-radius:6px;backdrop-filter:blur(20px)}
+.msg.me{margin-left:auto;background:linear-gradient(135deg,rgba(255,122,26,.85),rgba(124,92,255,.8));border-bottom-right-radius:6px;
+  box-shadow:var(--shine),0 6px 20px rgba(255,122,26,.25)}
+.msg code{background:rgba(0,0,0,.35);padding:1px 6px;border-radius:6px;font-size:13px}
+.msg pre{background:rgba(0,0,0,.4);padding:10px;border-radius:12px;overflow-x:auto;margin:6px 0;white-space:pre}
+.msg pre code{background:none;padding:0}
+.msg a{color:#9fd8ff}
+.typing{display:inline-flex;gap:5px;padding:4px 2px}
+.typing i{width:7px;height:7px;border-radius:50%;background:var(--text);opacity:.5;animation:bounce 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,60%,100%{transform:none;opacity:.35}30%{transform:translateY(-6px);opacity:1}}
+.hero{text-align:center;padding:36px 10px 10px}
+.hero .big{font-size:46px;filter:drop-shadow(0 6px 18px rgba(255,122,26,.5))}
+.hero h2{margin:8px 0 4px;font-size:22px}
+.hero p{margin:0;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.chip{padding:8px 13px;border-radius:999px;border:1px solid var(--stroke);background:var(--glass);color:var(--text);font:inherit;font-size:13px;cursor:pointer;
+  transition:transform .25s var(--spring),background .2s}
+.chip:active{transform:scale(.93);background:var(--glass-strong)}
+/* composer */
+.composer{position:absolute;left:12px;right:12px;bottom:calc(var(--sab) + 82px);display:flex;gap:8px;align-items:flex-end;padding:7px;border-radius:26px;z-index:4}
+.composer textarea{flex:1;resize:none;border:0;outline:0;background:transparent;color:var(--text);font:inherit;padding:9px 8px 9px 12px;max-height:120px;height:38px}
+.composer textarea::placeholder{color:var(--muted)}
+.send{width:40px;height:40px;border-radius:50%;border:0;color:#fff;font-size:17px;cursor:pointer;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:var(--shine),0 4px 14px rgba(255,122,26,.45);transition:transform .25s var(--spring)}
+.send:active{transform:scale(.85)}.send:disabled{opacity:.45}
+/* tab bar */
+nav{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(var(--sab) + 14px);z-index:6;display:flex;padding:5px;border-radius:30px;gap:2px;width:min(330px,calc(100% - 40px))}
+nav .pill{position:absolute;top:5px;bottom:5px;left:5px;width:calc(50% - 5px);border-radius:25px;background:var(--glass-strong);
+  border:1px solid var(--stroke);box-shadow:var(--shine);transition:transform .5s var(--spring)}
+nav button{flex:1;position:relative;z-index:1;border:0;background:none;color:var(--muted);font:inherit;font-weight:600;padding:11px 0;border-radius:25px;cursor:pointer;transition:color .25s}
+nav button.on{color:var(--text)}
+/* xiaomi */
+.search{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:20px;margin-bottom:14px}
+.search input{flex:1;border:0;outline:0;background:transparent;color:var(--text);font:inherit;font-size:16px}
+.search input::placeholder{color:var(--muted)}
+.sec{font-size:12px;letter-spacing:.9px;text-transform:uppercase;color:var(--muted);margin:16px 4px 8px}
+.card{display:flex;align-items:center;gap:12px;padding:13px 15px;border-radius:18px;margin-bottom:9px;cursor:pointer;transition:transform .25s var(--spring);animation:pop .4s var(--spring)}
+.card:active{transform:scale(.97)}
+.card .ic{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:rgba(255,122,26,.18);font-size:18px}
+.card b{display:block;font-size:15px}.card span{color:var(--muted);font-size:12.5px}
+.empty{text-align:center;color:var(--muted);padding:30px 10px}
+/* sheet */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:20;opacity:0;pointer-events:none;transition:opacity .3s}
+.scrim.on{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:0;right:0;bottom:0;height:88%;z-index:21;border-radius:30px 30px 0 0;transform:translateY(105%);transition:transform .55s var(--spring);display:flex;flex-direction:column;
+  background:rgba(22,24,40,.72)}
+.sheet.on{transform:none}
+.grab{width:42px;height:5px;border-radius:3px;background:rgba(255,255,255,.35);margin:9px auto 4px}
+.sh-head{padding:6px 20px 8px}
+.sh-head h3{margin:0;font-size:20px}.sh-head p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.tabs{display:flex;gap:6px;padding:6px 14px 10px;overflow-x:auto}.tabs::-webkit-scrollbar{display:none}
+.tab{flex:none;padding:8px 15px;border-radius:999px;border:1px solid var(--stroke);background:var(--glass);color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
+.tab.on{background:linear-gradient(135deg,rgba(255,122,26,.9),rgba(124,92,255,.85));color:#fff;border-color:transparent}
+.sh-body{flex:1;overflow-y:auto;padding:4px 16px calc(var(--sab) + 30px)}.sh-body::-webkit-scrollbar{display:none}
+.row{display:flex;justify-content:space-between;gap:14px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.08);font-size:14px}
+.row span:first-child{color:var(--muted);flex:none}.row span:last-child{text-align:right}
+.item{padding:12px 14px;border-radius:16px;margin-bottom:10px;background:var(--glass);border:1px solid var(--stroke);box-shadow:var(--shine)}
+.item .t{font-weight:600;margin-bottom:3px;word-break:break-word}.item .m{color:var(--muted);font-size:12.5px;margin-bottom:9px}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:700;background:rgba(24,198,255,.2);color:#8fe3ff;margin-right:6px}
+.tag.st{background:rgba(52,211,153,.2);color:#8ff0c4}.tag.wk{background:rgba(255,122,26,.22);color:#ffc08a}
+.dl{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:12px;border:0;color:#fff;font:inherit;font-weight:600;font-size:13px;cursor:pointer;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:var(--shine);margin:0 6px 6px 0}
+.dl.alt{background:var(--glass-strong);border:1px solid var(--stroke)}
+.dl:active{transform:scale(.94)}
+.grp{font-weight:700;margin:16px 2px 8px;color:#ffd2ad}
+.toast{position:fixed;left:50%;top:calc(var(--sat) + 70px);transform:translate(-50%,-20px);opacity:0;z-index:50;padding:10px 16px;border-radius:16px;transition:.4s var(--spring);max-width:90%}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.skel{height:56px;border-radius:16px;margin-bottom:10px;background:linear-gradient(90deg,var(--glass),var(--glass-strong),var(--glass));background-size:200% 100%;animation:sh 1.3s infinite}
+@keyframes sh{to{background-position:-200% 0}}
+</style>
+</head>
+<body>
+<div class="bg"><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div></div>
+
+<header class="glass">
+  <div class="logo">✨</div>
+  <div><h1>ProAI</h1><small id="sub">Smart • Stylish • Fast</small></div>
+  <div class="grow"></div>
+  <button class="icon-btn" id="resetBtn" title="New chat">↺</button>
+</header>
+
+<main>
+  <section class="view on" id="v-chat">
+    <div class="scroll" id="chat"></div>
+    <div class="composer glass">
+      <textarea id="input" rows="1" placeholder="ProAI se kuch bhi poochho…"></textarea>
+      <button class="send" id="send">➤</button>
+    </div>
+  </section>
+
+  <section class="view" id="v-mi">
+    <div class="scroll">
+      <div class="search glass"><span>🔎</span><input id="q" placeholder="Device ka naam ya codename (whyred, poco f3…)" autocomplete="off" autocapitalize="off"></div>
+      <div id="results"></div>
+    </div>
+  </section>
+</main>
+
+<nav class="glass">
+  <div class="pill" id="pill"></div>
+  <button class="on" data-tab="chat">💬 Chat</button>
+  <button data-tab="mi">📱 Xiaomi</button>
+</nav>
+
+<div class="scrim" id="scrim"></div>
+<div class="sheet glass" id="sheet">
+  <div class="grab"></div>
+  <div class="sh-head"><h3 id="shTitle"></h3><p id="shSub"></p></div>
+  <div class="tabs" id="shTabs"></div>
+  <div class="sh-body" id="shBody"></div>
+</div>
+<div class="toast glass" id="toast"></div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); try{tg.setHeaderColor('#05060f');tg.setBackgroundColor('#05060f');}catch(e){} }
+const INIT = tg ? tg.initData : "";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const hap = (t='light') => { try{ tg && tg.HapticFeedback.impactOccurred(t); }catch(e){} };
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('on'),2600)}
+function openLink(u){ if(!u) return; hap(); if(tg){ /^https:\/\/t\.me\//.test(u) ? tg.openTelegramLink(u) : tg.openLink(u);} else window.open(u,'_blank'); }
+document.addEventListener('click', e => { const b = e.target.closest('[data-url]'); if (b) openLink(b.dataset.url); });
+
+async function api(path, opts={}) {
+  const r = await fetch(path, {...opts, headers: {"Content-Type":"application/json","X-Init-Data":INIT}});
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(j.error || ("Error " + r.status));
+  return j;
+}
+if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) $('#sub').textContent = "Hey " + tg.initDataUnsafe.user.first_name + " 👋";
+
+/* tabs */
+function setTab(t){
+  hap('soft');
+  document.querySelectorAll('nav button').forEach((b,i)=>{b.classList.toggle('on',b.dataset.tab===t); if(b.dataset.tab===t) $('#pill').style.transform=`translateX(${i*100}%)`;});
+  $('#v-chat').classList.toggle('on', t==='chat'); $('#v-mi').classList.toggle('on', t==='mi');
+  $('#resetBtn').style.visibility = t==='chat' ? 'visible' : 'hidden';
+}
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => setTab(b.dataset.tab));
+
+/* ───── Chat ───── */
+const chatEl = $('#chat'), input = $('#input'), sendBtn = $('#send');
+let msgs = []; try { msgs = JSON.parse(localStorage.getItem('proai_msgs') || '[]'); } catch(e){}
+const save = () => { try { localStorage.setItem('proai_msgs', JSON.stringify(msgs.slice(-60))); } catch(e){} };
+function md(s){
+  let h = esc(s);
+  h = h.replace(/```(?:\w+)?\n?([\s\S]*?)```/g, (_,c)=>`<pre><code>${c}</code></pre>`);
+  h = h.replace(/`([^`\n]+)`/g,'<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>');
+  return h.replace(/(https?:\/\/[^\s<]+)/g,'<a href="#" data-url="$1">$1</a>');
+}
+function addMsg(role, text, store=true){
+  const d = document.createElement('div'); d.className = 'msg ' + (role==='me'?'me':'bot');
+  d.innerHTML = md(text); chatEl.appendChild(d); chatEl.scrollTop = chatEl.scrollHeight;
+  if (store){ msgs.push({role,text}); save(); } return d;
+}
+function hero(){
+  chatEl.innerHTML = `<div class="hero"><div class="big">✨</div><h2>Main ProAI hu</h2><p>Kuch bhi poochho — chhote, stylish jawab milenge.</p>
+  <div class="chips">${["Redmi Note 13 Pro kaisa hai?","HyperOS kya hai?","Python me API kaise banate hain?","Mujhe ek joke sunao 😄"].map(c=>`<button class="chip" data-s="${esc(c)}">${esc(c)}</button>`).join('')}</div></div>`;
+  chatEl.querySelectorAll('.chip').forEach(c => c.onclick = () => { input.value = c.dataset.s; send(); });
+}
+function render(){ chatEl.innerHTML=''; if(!msgs.length) hero(); else msgs.forEach(m=>addMsg(m.role,m.text,false)); }
+async function send(){
+  const text = input.value.trim(); if(!text || sendBtn.disabled) return;
+  if (!msgs.length) chatEl.innerHTML='';
+  addMsg('me', text); input.value=''; autoGrow(); sendBtn.disabled = true; hap();
+  const t = addMsg('bot','',false); t.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+  try { const r = await api('/api/chat',{method:'POST',body:JSON.stringify({text})}); t.remove(); addMsg('bot', r.reply); hap('soft'); }
+  catch(e){ t.remove(); addMsg('bot','⚠️ '+e.message,false); }
+  sendBtn.disabled = false; input.focus();
+}
+function autoGrow(){ input.style.height='38px'; input.style.height=Math.min(input.scrollHeight,120)+'px'; }
+input.addEventListener('input', autoGrow);
+input.addEventListener('keydown', e => { if(e.key==='Enter' && !e.shiftKey && !('ontouchstart' in window)){ e.preventDefault(); send(); }});
+sendBtn.onclick = send;
+$('#resetBtn').onclick = async () => { hap('medium'); msgs=[]; save(); hero(); try{ await api('/api/reset',{method:'POST',body:'{}'}); toast('Nayi chat shuru ✨'); }catch(e){} };
+render();
+
+/* ───── Xiaomi ───── */
+const POP = [["whyred","Redmi Note 5"],["alioth","POCO F3"],["lmi","POCO F2 Pro"],["sweet","Note 10 Pro"],["marble","POCO F5"],["vayu","POCO X3 Pro"],["garnet","Note 13 Pro 5G"],["gauguin","Mi 10T Lite"]];
+const resEl = $('#results'), qEl = $('#q');
+function home(){
+  resEl.innerHTML = `<div class="sec">Popular devices</div>` + POP.map(([c,n])=>card(c,n)).join('') +
+    `<div class="empty">Naam likho (jaise <b>poco f3</b>) ya codename (<b>alioth</b>) 👆</div>`;
+}
+const card = (c,n) => `<div class="card glass" data-cn="${esc(c)}"><div class="ic">📱</div><div><b>${esc(n)}</b><span>${esc(c)}</span></div></div>`;
+resEl.addEventListener('click', e => { const c = e.target.closest('.card'); if(c){ hap(); openDevice(c.dataset.cn); } });
+let timer;
+qEl.addEventListener('input', () => { clearTimeout(timer); const v = qEl.value.trim(); if(!v) return home();
+  timer = setTimeout(async () => {
+    resEl.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel"></div>';
+    try { const r = await api('/api/xiaomi/search?q='+encodeURIComponent(v));
+      resEl.innerHTML = r.results.length ? r.results.map(x=>card(x.codename,x.name)).join('') : '<div class="empty">Koi device nahi mila 🤷<br>Dusra naam try karo.</div>';
+    } catch(e){ resEl.innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`; } }, 280); });
+home();
+
+const sheet = $('#sheet'), scrim = $('#scrim'); let D = null;
+function closeSheet(){ sheet.classList.remove('on'); scrim.classList.remove('on'); }
+scrim.onclick = closeSheet;
+let sy=0; sheet.addEventListener('touchstart',e=>{sy=e.touches[0].clientY},{passive:true});
+sheet.addEventListener('touchend',e=>{ if(e.changedTouches[0].clientY-sy>110 && $('#shBody').scrollTop<=0) closeSheet(); });
+async function openDevice(cn){
+  $('#shTitle').textContent = 'Loading…'; $('#shSub').textContent = cn; $('#shTabs').innerHTML='';
+  $('#shBody').innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel"></div>';
+  sheet.classList.add('on'); scrim.classList.add('on');
+  try { D = await api('/api/xiaomi/device?cn='+encodeURIComponent(cn)); }
+  catch(e){ $('#shTitle').textContent='Oops'; $('#shBody').innerHTML=`<div class="empty">⚠️ ${esc(e.message)}</div>`; return; }
+  $('#shTitle').textContent = D.name; $('#shSub').textContent = 'codename: ' + D.codename;
+  const tabs = [['info','ℹ️ Info']];
+  if (D.roms) tabs.push(['roms','📦 ROMs']);
+  if (D.twrp || D.pb || D.of) tabs.push(['rec','🛠 Recovery']);
+  if (D.eu) tabs.push(['eu','🇪🇺 EU']);
+  if (D.firmware) tabs.push(['fw','⚙️ Firmware']);
+  $('#shTabs').innerHTML = tabs.map(([k,l],i)=>`<button class="tab${i?'':' on'}" data-k="${k}">${l}</button>`).join('');
+  $('#shTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { hap('soft');
+    $('#shTabs').querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===b)); show(b.dataset.k); });
+  show('info');
+}
+const btn = (label,url,alt) => `<button class="dl${alt?' alt':''}" data-url="${esc(url)}">${label}</button>`;
+function romList(rows){
+  if(!rows||!rows.length) return '<div class="empty">Koi ROM nahi mila 🤷</div>';
+  let out='', last=null;
+  rows.forEach(r => { if(r.name!==last){ out+=`<div class="grp">${esc(r.name)}</div>`; last=r.name; }
+    const cls = r.branch==='Stable'?'st':(r.branch==='Weekly'?'wk':'');
+    out+=`<div class="item"><div class="t"><span class="tag ${cls}">${esc(r.branch)}</span>${esc(r.version)}</div>
+      <div class="m">Android ${esc(r.android)} • ${esc(r.size||'-')} • ${esc(r.date||'-')}</div>${btn('⬇️ Download',r.link)}</div>`; });
+  return out;
+}
+function show(k){
+  const b = $('#shBody'); let h = '';
+  if (k==='info'){
+    if (D.specs){ h += `<div class="sec">Specs — ${esc(D.specs.name)}</div>` + D.specs.rows.map(([a,v])=>`<div class="row"><span>${esc(a)}</span><span>${esc(v)}</span></div>`).join('');
+      h += '<div style="height:12px"></div>' + btn('GSMArena page',D.specs.url,true); }
+    else h += '<div class="empty">Is device ke specs available nahi hain.</div>';
+    if (D.models) h += `<div class="sec">Model numbers (${esc(D.models.internal)})</div>` + D.models.models.map(m=>`<div class="row"><span>${esc(m.model)}</span><span>${esc(m.name)}</span></div>`).join('');
+  }
+  if (k==='roms'){
+    h += `<div class="sec">Recovery ROMs</div>` + romList(D.roms.recovery);
+    if (D.roms.fastboot && D.roms.fastboot.length) h += `<div class="sec">Fastboot ROMs</div>` + romList(D.roms.fastboot);
+    h += `<div class="sec">Archive</div>` + btn('MIUI archive',D.archive.miui,true) + btn('HyperOS archive',D.archive.hyperos,true);
+  }
+  if (k==='rec'){
+    if (D.twrp) h += `<div class="item"><div class="t">TWRP</div><div class="m">${esc(D.twrp.file)} • ${esc(D.twrp.size)} • ${esc(D.twrp.date)}</div>${btn('⬇️ Download',D.twrp.link)}${btn('All builds',D.twrp.page,true)}</div>`;
+    if (D.pb) h += `<div class="item"><div class="t">PitchBlack</div><div class="m">${esc(D.pb.file)}</div>${btn('⬇️ Download',D.pb.link)}</div>`;
+    if (D.of) h += `<div class="item"><div class="t">OrangeFox 🦊</div><div class="m">${esc(D.of.name)}${D.of.maintainer?' • by '+esc(D.of.maintainer):''}</div>` +
+      D.of.builds.map(x=>btn('⬇️ '+esc(x.type),x.url)).join('') + btn('OrangeFox page',D.of.page,true) + '</div>';
+  }
+  if (k==='eu'){
+    h += `<div class="sec">${esc(D.eu.name)}</div>`;
+    if (D.eu.stable) h += `<div class="item"><div class="t"><span class="tag st">Stable</span></div><div class="m">${esc(D.eu.stable.file)}</div>${btn('⬇️ Download',D.eu.stable.link)}</div>`;
+    if (D.eu.weekly) h += `<div class="item"><div class="t"><span class="tag wk">Weekly</span></div><div class="m">${esc(D.eu.weekly.file)}</div>${btn('⬇️ Download',D.eu.weekly.link)}</div>`;
+    if (!D.eu.stable && !D.eu.weekly) h += '<div class="empty">Abhi koi build nahi 🤷</div>';
+  }
+  if (k==='fw'){
+    h += D.firmware.map(f=>`<div class="item"><div class="t"><span class="tag ${f.branch==='stable'?'st':'wk'}">${esc(f.branch)}</span>${esc(f.miui)}</div>
+      <div class="m">${esc(f.region||'')} • Android ${esc(f.android||'-')} • ${esc(f.date)}</div>${btn('⬇️ Download',f.link)}</div>`).join('');
+    h += '<div class="empty" style="padding:8px">Note: firmware data upstream me 2024 tak ka hai.</div>';
+  }
+  b.innerHTML = h; b.scrollTop = 0;
+}
+
+if (!INIT) setTimeout(()=>toast('Telegram ke andar kholo to hi kaam karega'), 800);
+setTab('chat');
+</script>
+</body>
+</html>
