@@ -12,9 +12,11 @@ from functools import wraps
 from collections import defaultdict, deque
 
 from openai import AsyncOpenAI
-from telegram import Update, BotCommand, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram import (Update, BotCommand, ChatPermissions, InlineKeyboardButton,
+                      InlineKeyboardMarkup, LinkPreviewOptions, WebAppInfo)
 from telegram.constants import ChatAction, ParseMode
 import xiaomi
+import search
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     ContextTypes, filters,
@@ -27,6 +29,7 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 AI_MODEL = os.environ.get("AI_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
 MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "55"))
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "5500"))
+TEMPERATURE = float(os.environ.get("AI_TEMPERATURE", "0.6"))
 BASE_URL = (os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
 
 ai = AsyncOpenAI(
@@ -87,18 +90,35 @@ def db_keys(chat, prefix):
 
 
 # ───────────────────────── AI personality ─────────────────────────
-def build_system_prompt() -> str:
+def persona() -> str:
     today = datetime.date.today().strftime("%d %B %Y")
     return (
-        "Tum 'ProAI' ho, ek smart aur stylish AI assistant jo Telegram pe "
-        "(@PraKrutim_bot) rehta hai. Tumhari vibe Apple Liquid Glass jaisi hai: "
-        "clean, premium aur smooth. "
+        "Tum 'ProAI' ho, ek AI assistant jo Telegram pe (@PraKrutim_bot) rehta hai. "
+        "Tum ek ladka (male) ho. Hamesha masculine Hinglish bolo: 'main kar raha hu', "
+        "'bata dunga', 'samajh gaya'. Kabhi 'rahi hu', 'karungi', 'gayi' jaisa feminine grammar mat use karo. "
         f"Aaj ki date hai {today}. "
-        "Hamesha chote, stylish aur energetic Hinglish me reply do. "
-        "Replies 3-4 lines me rakho jab tak user detail na maange. "
+        "Chote, stylish aur energetic Hinglish me reply do, 3-4 lines me jab tak user detail na maange. "
         "Emojis thode aur sahi jagah use karo. "
-        "Code ya technical sawaal me seedha aur accurate jawab do."
+        "Apne baare me design, UI ya 'Liquid Glass' ka zikr tab tak mat karo jab tak user na poochhe. "
     )
+
+
+def build_system_prompt() -> str:
+    if tools_ok:
+        rules = (
+            "Tumhare paas web_search tool hai. Latest ya badalne wali cheezon ke liye (naye phones, prices, "
+            "launch dates, news, scores, weather, aaj ke events, kisi ki current position) pehle web_search "
+            "chalao, phir sirf search results ke basis pe jawab do. Search query English me, chhoti aur specific rakho. "
+            "Result me jawab na mile to saaf bolo, guess ya specs invent mat karo. "
+            "Pakke general knowledge ke sawaalon pe search mat chalao. "
+        )
+    else:
+        rules = (
+            "Tumhare paas internet ya live data nahi hai aur knowledge purani ho sakti hai. "
+            "Latest phones, prices, news jaisi cheezon me guess mat karo, bolo 'mere paas latest info nahi hai'. "
+            "Specs ya model names kabhi invent mat karo. "
+        )
+    return persona() + rules + "Code ya technical sawaal me seedha aur accurate jawab do."
 
 
 history = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
@@ -124,7 +144,7 @@ Welcome vars: {first} {mention} {chatname}
 /save /get /notes /clear (ya #notename)
 /filter /filters /stop
 
-<b>Xiaomi Geeks</b> (codename do, jaise /twrp whyred)
+<b>Smart tools</b>\n/ask /search /news /tldr /translate\n(AI khud bhi zaroorat pe web search karta hai)\n\n<b>Xiaomi Geeks</b> (codename do, jaise /twrp whyred)
 /recovery /fastboot /latest /archive
 /firmware /vendor /eu /twrp /pb /of
 /specs /models /whatis /codename
@@ -503,165 +523,4 @@ async def clearrules(update, ctx):
 # ───────────────────────── Notes & Filters ─────────────────────────
 @group_admin("can_change_info")
 async def save(update, ctx):
-    msg = update.message
-    args = ctx.args or []
-    if not args:
-        return await msg.reply_text("Use: /save name text  (ya kisi message pe reply karke /save name)")
-    name = args[0].lower().lstrip("#")
-    content = (msg.reply_to_message.text if msg.reply_to_message and msg.reply_to_message.text
-               else " ".join(args[1:]))
-    if not content:
-        return await msg.reply_text("Note ka text bhi do 📝")
-    db_set(update.effective_chat.id, f"note:{name}", content)
-    await msg.reply_text(f"✅ Note <code>#{html.escape(name)}</code> save ho gaya", parse_mode=ParseMode.HTML)
-
-
-async def get_note(update, ctx):
-    if not ctx.args:
-        return await update.message.reply_text("Use: /get name")
-    n = db_get(update.effective_chat.id, f"note:{ctx.args[0].lower().lstrip('#')}")
-    await update.message.reply_text(n if n else "Aisa koi note nahi mila 🤷")
-
-
-async def notes(update, ctx):
-    ks = db_keys(update.effective_chat.id, "note:")
-    await update.message.reply_text(
-        "📝 Notes:\n" + "\n".join(f"#{k}" for k in ks) if ks else "Abhi koi note save nahi hai.")
-
-
-@group_admin("can_change_info")
-async def clear_note(update, ctx):
-    if not ctx.args:
-        return await update.message.reply_text("Use: /clear name")
-    db_del(update.effective_chat.id, f"note:{ctx.args[0].lower().lstrip('#')}")
-    await update.message.reply_text("🗑 Note delete")
-
-
-@group_admin("can_change_info")
-async def add_filter(update, ctx):
-    msg = update.message
-    args = ctx.args or []
-    if len(args) < 2:
-        return await msg.reply_text("Use: /filter keyword reply text")
-    db_set(update.effective_chat.id, f"filter:{args[0].lower()}", " ".join(args[1:]))
-    await msg.reply_text(f"✅ Filter <code>{html.escape(args[0].lower())}</code> set",
-                         parse_mode=ParseMode.HTML)
-
-
-async def list_filters(update, ctx):
-    ks = db_keys(update.effective_chat.id, "filter:")
-    await update.message.reply_text(
-        "🔎 Filters:\n" + "\n".join(f"• {k}" for k in ks) if ks else "Abhi koi filter nahi hai.")
-
-
-@group_admin("can_change_info")
-async def stop_filter(update, ctx):
-    if not ctx.args:
-        return await update.message.reply_text("Use: /stop keyword")
-    db_del(update.effective_chat.id, f"filter:{ctx.args[0].lower()}")
-    await update.message.reply_text("🛑 Filter hata diya")
-
-
-async def group_triggers(update, ctx):
-    """Group me #note aur filter keywords."""
-    chat, text = update.effective_chat, update.effective_message.text or ""
-    if chat.type == "private":
-        return
-    for tag in re.findall(r"#(\w+)", text):
-        n = db_get(chat.id, f"note:{tag.lower()}")
-        if n:
-            return await update.effective_message.reply_text(n)
-    low = text.lower()
-    for kw in db_keys(chat.id, "filter:"):
-        if re.search(rf"\b{re.escape(kw)}\b", low):
-            return await update.effective_message.reply_text(db_get(chat.id, f"filter:{kw}"))
-
-
-# ───────────────────────── AI chat ─────────────────────────
-async def ai_reply(cid, text) -> str:
-    """AI ka jawab (Telegram chat + Mini App dono yahi use karte hain)."""
-    history[cid].append({"role": "user", "content": text})
-    try:
-        res = await ai.chat.completions.create(
-            model=AI_MODEL,
-            messages=[{"role": "system", "content": build_system_prompt()}, *history[cid]],
-            max_tokens=MAX_TOKENS,
-        )
-        reply = res.choices[0].message.content or "…"
-        history[cid].append({"role": "assistant", "content": reply})
-    except Exception as e:
-        log.exception("AI error")
-        reply = f"⚠️ AI error: {e}"
-    return reply
-
-
-def reset_history(cid):
-    history[cid].clear()
-
-
-async def chat(update, ctx):
-    msg, chat_obj = update.message, update.effective_chat
-    text = msg.text
-    if chat_obj.type != "private":
-        mention = f"@{ctx.bot.username}".lower()
-        replied_to_bot = (msg.reply_to_message and msg.reply_to_message.from_user
-                          and msg.reply_to_message.from_user.id == ctx.bot.id)
-        if mention not in text.lower() and not replied_to_bot:
-            return
-        text = re.sub(re.escape(mention), "", text, flags=re.I).strip() or "hi"
-        text = f"{update.effective_user.first_name}: {text}"
-
-    await ctx.bot.send_chat_action(chat_obj.id, ChatAction.TYPING)
-    reply = await ai_reply(chat_obj.id, text)
-    await msg.reply_text(reply)
-
-
-# ───────────────────────── Setup ─────────────────────────
-async def post_init(app):
-    await app.bot.set_my_commands([
-        BotCommand("app", "ProAI Mini App kholo"), BotCommand("help", "Saare commands"), BotCommand("id", "User/chat ID"),
-        BotCommand("rules", "Group rules"), BotCommand("notes", "Saved notes"),
-        BotCommand("filters", "Active filters"), BotCommand("warns", "Warns check"),
-        BotCommand("admins", "Admin list"), BotCommand("ping", "Bot alive?"),
-        BotCommand("recovery", "MIUI/HyperOS recovery ROM"), BotCommand("twrp", "TWRP download"),
-        BotCommand("codename", "Device name se codename"), BotCommand("specs", "Device specs"),
-        BotCommand("reset", "AI chat reset"),
-    ])
-
-
-def main():
-    builder = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init)
-    if BASE_URL:
-        builder = builder.updater(None)  # webhook Starlette server khud handle karega
-    app = builder.build()
-    cmds = {
-        "start": start, "help": help_cmd, "app": app_cmd, "reset": reset, "ping": ping, "id": id_cmd,
-        "info": info, "admins": admins, "adminlist": admins,
-        "ban": ban, "tban": ban, "unban": unban, "kick": kick, "kickme": kickme,
-        "mute": mute, "tmute": mute, "unmute": unmute,
-        "warn": warn, "unwarn": unwarn, "resetwarns": resetwarns, "warns": warns,
-        "setwarnlimit": setwarnlimit, "pin": pin, "unpin": unpin, "del": delete, "purge": purge,
-        "setwelcome": setwelcome, "welcome": welcome, "resetwelcome": resetwelcome,
-        "setrules": setrules, "rules": rules, "clearrules": clearrules,
-        "save": save, "get": get_note, "notes": notes, "clear": clear_note,
-        "filter": add_filter, "filters": list_filters, "stop": stop_filter,
-    }
-    for name, fn in cmds.items():
-        app.add_handler(CommandHandler(name, fn))
-    xiaomi.register(app, db_get, db_set)
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_members))
-    text = filters.TEXT & ~filters.COMMAND
-    app.add_handler(MessageHandler(text, group_triggers), group=1)
-    app.add_handler(MessageHandler(text, chat), group=2)
-
-    if BASE_URL:
-        import uvicorn
-        import webapp
-        web = webapp.create_app(BOT_TOKEN, app, ai_reply, reset_history, BASE_URL, post_init)
-        uvicorn.run(web, host="0.0.0.0", port=int(os.environ.get("PORT", "10000")), log_level="info")
-    else:
-        app.run_polling()
-
-
-if __name__ == "__main__":
-    main()
+    msg = upda
