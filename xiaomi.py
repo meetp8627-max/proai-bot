@@ -502,3 +502,121 @@ def register(app, db_get, db_set):
     }
     for name, fn in cmds.items():
         app.add_handler(CommandHandler(name, fn))
+
+
+# ───────────────────────── Mini App data API ─────────────────────────
+async def search_devices(q, limit=30):
+    q = (q or "").lower().strip()
+    if len(q) < 2:
+        return []
+    scored = []
+    for cn, nm in (await names()).items():
+        low = nm.lower()
+        parts = [p.strip() for p in low.split("/")]
+        if q == cn:
+            s = 0
+        elif cn.startswith(q):
+            s = 1
+        elif any(p.startswith(q) for p in parts):
+            s = 2
+        elif q in low or q in cn:
+            s = 3
+        else:
+            continue
+        scored.append((s, nm, cn))
+    scored.sort()
+    return [{"codename": cn, "name": nm} for _, nm, cn in scored[:limit]]
+
+
+def _rom_rows(roms, method):
+    return [{k: r[k] for k in ("name", "branch", "version", "android", "size", "date", "link")}
+            for r in pick_roms(roms, method)]
+
+
+def _spec_summary(i, device):
+    s = i["specs"]
+    g = lambda sec, key: (s.get(sec) or {}).get(key) or "-"
+    first = lambda sec: " ".join(next(iter((s.get(sec) or {"-": "-"}).items())))
+    rows = [("Status", g("Launch", "Status")), ("Network", g("Network", "Technology")),
+            ("Display", f"{g('Display', 'Type')}, {g('Display', 'Size')}"), ("Resolution", g("Display", "Resolution")),
+            ("Chipset", g("Platform", "Chipset")), ("CPU", g("Platform", "CPU")), ("GPU", g("Platform", "GPU")),
+            ("Memory", g("Memory", "Internal")), ("Rear camera", first("Main Camera")),
+            ("Front camera", first("Selfie camera")), ("Battery", g("Battery", "Type")),
+            ("Charging", g("Battery", "Charging")), ("Weight", g("Body", "Weight")),
+            ("USB", g("Comms", "USB")), ("3.5mm jack", g("Sound", "3.5mm jack")),
+            ("Sensors", g("Features", "Sensors"))]
+    return {"name": i["name"], "url": i["url"], "rows": [{"k": k, "v": v} for k, v in rows if v != "-"]}
+
+
+async def device_detail(cn):
+    nm = await names()
+    if cn not in nm:
+        return None
+    res = await asyncio.gather(miui_roms(), firmware_data(), vendor_data(), models(), specs_data(),
+                               return_exceptions=True)
+    ok = lambda r, d: d if isinstance(r, Exception) else r
+    roms, fw, vd, md, sp = (ok(res[0], {}), ok(res[1], {}), ok(res[2], {}), ok(res[3], {}), ok(res[4], []))
+    dev_roms = roms.get(cn, [])
+    return {
+        "codename": cn, "name": nm[cn],
+        "recovery": _rom_rows(dev_roms, "Recovery"), "fastboot": _rom_rows(dev_roms, "Fastboot"),
+        "firmware": [{k: i.get(k) for k in ("region", "branch", "miui", "date", "link")} for i in fw.get(cn, [])[:6]],
+        "vendor": [{k: i.get(k) for k in ("branch", "miui", "date", "link")} for i in vd.get(cn, [])[:4]],
+        "specs": [_spec_summary(i, cn) for i in sp if cn in i.get("codenames", [])][:2],
+        "models": [{"model": k.strip("`"), "name": v} for k, v in (md.get(cn, {}).get("models", {})).items()],
+        "links": {"miui": f"{SITE}/archive/miui/{cn}/", "hyperos": f"{SITE}/archive/hyperos/{cn}/",
+                  "firmware": f"{SITE}/firmware/{cn}/", "vendor": f"{SITE}/vendor/{cn}/"},
+    }
+
+
+async def _twrp_info(cn):
+    devs = await twrp_devices()
+    if cn not in devs:
+        return None
+    link = devs[cn]["link"]
+    row = BeautifulSoup(await fetch(link), "html.parser").find("table").find("tr")
+    a = row.find("a")
+    return {"name": devs[cn]["name"], "file": a.text, "url": f"https://dl.twrp.me{a['href']}",
+            "size": row.find("span", {"class": "filesize"}).text, "date": row.find("em").text.strip(), "page": link}
+
+
+async def _pb_info(cn):
+    links = [i for i in await pb_links() if cn in i]
+    if not links:
+        return None
+    return {"file": links[0].split("/")[-2], "url": links[0],
+            "page": "https://sourceforge.net/projects/pitchblack-twrp/files/"}
+
+
+async def _of_info(cn):
+    api = "https://api.orangefox.download/v3"
+    d = await load_json(f"{api}/devices/get?codename={cn}")
+    out = {"name": d.get("full_name", cn), "maintainer": (d.get("maintainer") or {}).get("name"),
+           "page": f"https://orangefox.download/device/{cn}", "downloads": []}
+    for typ in ("stable", "beta"):
+        rl = await load_json(f"{api}/releases/?device_id={d['_id']}&type={typ}&limit=1")
+        if rl.get("data"):
+            rel = await load_json(f"{api}/releases/get?_id={rl['data'][0]['_id']}")
+            out["downloads"].append({"type": typ, "file": rel["filename"], "url": rel["url"]})
+    return out
+
+
+async def _eu_info(cn):
+    devs = await eu_codenames()
+    if cn not in devs:
+        return None
+    code = re.escape(devs[cn][1])
+    links = await eu_links()
+    weekly = [i for i in links if re.search(rf"{code}_(?:V|OS).*DEV", i)]
+    stable = [i for i in links if re.search(rf"{code}_(?:V|OS)", i) and i not in weekly]
+    pick = lambda l: ({"file": l[0].split("/")[-2], "url": l[0]} if l else None)
+    return {"stable": pick(stable), "weekly": pick(weekly)}
+
+
+async def recoveries(cn):
+    res = await asyncio.gather(_twrp_info(cn), _pb_info(cn), _of_info(cn), _eu_info(cn), return_exceptions=True)
+    for r in res:
+        if isinstance(r, Exception):
+            log.warning("recovery lookup failed: %r", r)
+    ok = lambda r: None if isinstance(r, Exception) else r
+    return {"twrp": ok(res[0]), "pitchblack": ok(res[1]), "orangefox": ok(res[2]), "eu": ok(res[3])}
