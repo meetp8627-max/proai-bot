@@ -25,8 +25,8 @@ log = logging.getLogger("proai")
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 AI_MODEL = os.environ.get("AI_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
-MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "40"))
-MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
+MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "55"))
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "5500"))
 BASE_URL = (os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
 
 ai = AsyncOpenAI(
