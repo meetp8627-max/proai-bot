@@ -12,7 +12,7 @@ from functools import wraps
 from collections import defaultdict, deque
 
 from openai import AsyncOpenAI
-from telegram import Update, BotCommand, ChatPermissions
+from telegram import Update, BotCommand, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.constants import ChatAction, ParseMode
 import xiaomi
 from telegram.ext import (
@@ -25,8 +25,9 @@ log = logging.getLogger("proai")
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 AI_MODEL = os.environ.get("AI_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
-MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "55"))
-MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "5000"))
+MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "40"))
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
+BASE_URL = (os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
 
 ai = AsyncOpenAI(
     api_key=os.environ["AI_API_KEY"],
@@ -90,10 +91,10 @@ def build_system_prompt() -> str:
     today = datetime.date.today().strftime("%d %B %Y")
     return (
         "Tum 'ProAI' ho, ek smart aur stylish AI assistant jo Telegram pe "
-        "(@PraKrutim_bot) rehta hai. xiaomi ya kisi bhi device me madad kar sakta hai.: "
+        "(@PraKrutim_bot) rehta hai. Tumhari vibe Apple Liquid Glass jaisi hai: "
         "clean, premium aur smooth. "
         f"Aaj ki date hai {today}. "
-        "Hamesha premium, stylish aur energetic Hinglish me reply do. "
+        "Hamesha chote, stylish aur energetic Hinglish me reply do. "
         "Replies 3-4 lines me rakho jab tak user detail na maange. "
         "Emojis thode aur sahi jagah use karo. "
         "Code ya technical sawaal me seedha aur accurate jawab do."
@@ -103,10 +104,10 @@ def build_system_prompt() -> str:
 history = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 
 HELP = """<b>ProAI ✨</b>
-DM me kuch bhi poocho. Group me mujhe @mention karo ya mere message pe reply karo.
+Private me kuch bhi poocho. Group me mujhe @mention karo ya mere message pe reply karo.
 
 <b>Basic</b>
-/id /info /ping /reset /admins
+/app (Mini App) /id /info /ping /reset /admins
 
 <b>Admin</b> (reply ya user ID)
 /ban /unban /kick /kickme /mute /unmute
@@ -211,6 +212,15 @@ async def start(update, ctx):
 
 async def help_cmd(update, ctx):
     await update.message.reply_text(HELP, parse_mode=ParseMode.HTML)
+
+
+async def app_cmd(update, ctx):
+    if not BASE_URL:
+        return await update.message.reply_text("Mini App abhi off hai (server URL set nahi).")
+    if update.effective_chat.type != "private":
+        return await update.message.reply_text(f"Mini App private chat me khulta hai 👉 https://t.me/{ctx.bot.username}")
+    await update.message.reply_text("ProAI Mini App ✨", reply_markup=InlineKeyboardMarkup(
+        [[InlineKeyboardButton("✨ Open ProAI", web_app=WebAppInfo(url=BASE_URL))]]))
 
 
 async def reset(update, ctx):
@@ -568,6 +578,27 @@ async def group_triggers(update, ctx):
 
 
 # ───────────────────────── AI chat ─────────────────────────
+async def ai_reply(cid, text) -> str:
+    """AI ka jawab (Telegram chat + Mini App dono yahi use karte hain)."""
+    history[cid].append({"role": "user", "content": text})
+    try:
+        res = await ai.chat.completions.create(
+            model=AI_MODEL,
+            messages=[{"role": "system", "content": build_system_prompt()}, *history[cid]],
+            max_tokens=MAX_TOKENS,
+        )
+        reply = res.choices[0].message.content or "…"
+        history[cid].append({"role": "assistant", "content": reply})
+    except Exception as e:
+        log.exception("AI error")
+        reply = f"⚠️ AI error: {e}"
+    return reply
+
+
+def reset_history(cid):
+    history[cid].clear()
+
+
 async def chat(update, ctx):
     msg, chat_obj = update.message, update.effective_chat
     text = msg.text
@@ -580,27 +611,15 @@ async def chat(update, ctx):
         text = re.sub(re.escape(mention), "", text, flags=re.I).strip() or "hi"
         text = f"{update.effective_user.first_name}: {text}"
 
-    cid = chat_obj.id
-    history[cid].append({"role": "user", "content": text})
-    await ctx.bot.send_chat_action(cid, ChatAction.TYPING)
-    try:
-        res = await ai.chat.completions.create(
-            model=AI_MODEL,
-            messages=[{"role": "system", "content": build_system_prompt()}, *history[cid]],
-            max_tokens=MAX_TOKENS,
-        )
-        reply = res.choices[0].message.content
-        history[cid].append({"role": "assistant", "content": reply})
-    except Exception as e:
-        log.exception("AI error")
-        reply = f"⚠️ AI error: {e}"
+    await ctx.bot.send_chat_action(chat_obj.id, ChatAction.TYPING)
+    reply = await ai_reply(chat_obj.id, text)
     await msg.reply_text(reply)
 
 
 # ───────────────────────── Setup ─────────────────────────
 async def post_init(app):
     await app.bot.set_my_commands([
-        BotCommand("help", "Saare commands"), BotCommand("id", "User/chat ID"),
+        BotCommand("app", "ProAI Mini App kholo"), BotCommand("help", "Saare commands"), BotCommand("id", "User/chat ID"),
         BotCommand("rules", "Group rules"), BotCommand("notes", "Saved notes"),
         BotCommand("filters", "Active filters"), BotCommand("warns", "Warns check"),
         BotCommand("admins", "Admin list"), BotCommand("ping", "Bot alive?"),
@@ -611,9 +630,12 @@ async def post_init(app):
 
 
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
+    builder = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init)
+    if BASE_URL:
+        builder = builder.updater(None)  # webhook Starlette server khud handle karega
+    app = builder.build()
     cmds = {
-        "start": start, "help": help_cmd, "reset": reset, "ping": ping, "id": id_cmd,
+        "start": start, "help": help_cmd, "app": app_cmd, "reset": reset, "ping": ping, "id": id_cmd,
         "info": info, "admins": admins, "adminlist": admins,
         "ban": ban, "tban": ban, "unban": unban, "kick": kick, "kickme": kickme,
         "mute": mute, "tmute": mute, "unmute": unmute,
@@ -632,10 +654,11 @@ def main():
     app.add_handler(MessageHandler(text, group_triggers), group=1)
     app.add_handler(MessageHandler(text, chat), group=2)
 
-    webhook = os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL")
-    if webhook:
-        app.run_webhook(listen="0.0.0.0", port=int(os.environ.get("PORT", "10000")),
-                        url_path=BOT_TOKEN, webhook_url=f"{webhook}/{BOT_TOKEN}")
+    if BASE_URL:
+        import uvicorn
+        import webapp
+        web = webapp.create_app(BOT_TOKEN, app, ai_reply, reset_history, BASE_URL, post_init)
+        uvicorn.run(web, host="0.0.0.0", port=int(os.environ.get("PORT", "10000")), log_level="info")
     else:
         app.run_polling()
 
