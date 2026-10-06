@@ -206,8 +206,8 @@ function addMsg(role, text, store=true){
   if (store){ msgs.push({role,text}); save(); } return d;
 }
 function hero(){
-  chatEl.innerHTML = `<div class="hero"><div class="big">✨</div><h2>Main ProAI hu</h2><p>Kuch bhi poochho — chhote, stylish jawab milenge.</p>
-  <div class="chips">${["Redmi Note 13 Pro kaisa hai?","HyperOS kya hai?","Python me API kaise banate hain?","Mujhe ek joke sunao 😄"].map(c=>`<button class="chip" data-s="${esc(c)}">${esc(c)}</button>`).join('')}</div></div>`;
+  chatEl.innerHTML = `<div class="hero"><div class="big">✨</div><h2>Main ProAI hu</h2><p>Kuch bhi poochho — latest cheezon ke liye main internet bhi search karta hu 🌐</p>
+  <div class="chips">${["Aaj ki top news kya hai?","Latest Redmi phones konse hain?","HyperOS kya hai?","Python me API kaise banate hain?"].map(c=>`<button class="chip" data-s="${esc(c)}">${esc(c)}</button>`).join('')}</div></div>`;
   chatEl.querySelectorAll('.chip').forEach(c => c.onclick = () => { input.value = c.dataset.s; send(); });
 }
 function render(){ chatEl.innerHTML=''; if(!msgs.length) hero(); else msgs.forEach(m=>addMsg(m.role,m.text,false)); }
