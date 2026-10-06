@@ -216,7 +216,7 @@ async function send(){
   if (!msgs.length) chatEl.innerHTML='';
   addMsg('me', text); input.value=''; autoGrow(); sendBtn.disabled = true; hap();
   const t = addMsg('bot','',false); t.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
-  try { const r = await api('/api/chat',{method:'POST',body:JSON.stringify({text})}); t.remove(); addMsg('bot', r.reply); hap('soft'); }
+  try { const r = await api('/api/chat',{method:'POST',body:JSON.stringify({message:text})}); t.remove(); addMsg('bot', r.reply); hap('soft'); }
   catch(e){ t.remove(); addMsg('bot','⚠️ '+e.message,false); }
   sendBtn.disabled = false; input.focus();
 }
@@ -232,12 +232,12 @@ const POP = [["whyred","Redmi Note 5"],["alioth","POCO F3"],["lmi","POCO F2 Pro"
 const resEl = $('#results'), qEl = $('#q');
 function home(){
   resEl.innerHTML = `<div class="sec">Popular devices</div>` + POP.map(([c,n])=>card(c,n)).join('') +
-    `<div class="empty">Naam likho (jaise <b>poco f3</b>) ya codename (<b>alioth</b>) 👆</div>`;
+    `<div class="empty">Kam se kam 2 letters likho (jaise <b>poco f3</b> ya <b>alioth</b>) 👆</div>`;
 }
 const card = (c,n) => `<div class="card glass" data-cn="${esc(c)}"><div class="ic">📱</div><div><b>${esc(n)}</b><span>${esc(c)}</span></div></div>`;
 resEl.addEventListener('click', e => { const c = e.target.closest('.card'); if(c){ hap(); openDevice(c.dataset.cn); } });
 let timer;
-qEl.addEventListener('input', () => { clearTimeout(timer); const v = qEl.value.trim(); if(!v) return home();
+qEl.addEventListener('input', () => { clearTimeout(timer); const v = qEl.value.trim(); if(v.length<2) return home();
   timer = setTimeout(async () => {
     resEl.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel"></div>';
     try { const r = await api('/api/xiaomi/search?q='+encodeURIComponent(v));
@@ -245,23 +245,20 @@ qEl.addEventListener('input', () => { clearTimeout(timer); const v = qEl.value.t
     } catch(e){ resEl.innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`; } }, 280); });
 home();
 
-const sheet = $('#sheet'), scrim = $('#scrim'); let D = null;
+const sheet = $('#sheet'), scrim = $('#scrim'); let D = null, REC = null, curCn = null, curTab = 'info';
 function closeSheet(){ sheet.classList.remove('on'); scrim.classList.remove('on'); }
 scrim.onclick = closeSheet;
 let sy=0; sheet.addEventListener('touchstart',e=>{sy=e.touches[0].clientY},{passive:true});
 sheet.addEventListener('touchend',e=>{ if(e.changedTouches[0].clientY-sy>110 && $('#shBody').scrollTop<=0) closeSheet(); });
 async function openDevice(cn){
+  curCn = cn; D = null; REC = null;
   $('#shTitle').textContent = 'Loading…'; $('#shSub').textContent = cn; $('#shTabs').innerHTML='';
   $('#shBody').innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel"></div>';
   sheet.classList.add('on'); scrim.classList.add('on');
-  try { D = await api('/api/xiaomi/device?cn='+encodeURIComponent(cn)); }
+  try { D = await api('/api/xiaomi/device/'+encodeURIComponent(cn)); }
   catch(e){ $('#shTitle').textContent='Oops'; $('#shBody').innerHTML=`<div class="empty">⚠️ ${esc(e.message)}</div>`; return; }
   $('#shTitle').textContent = D.name; $('#shSub').textContent = 'codename: ' + D.codename;
-  const tabs = [['info','ℹ️ Info']];
-  if (D.roms) tabs.push(['roms','📦 ROMs']);
-  if (D.twrp || D.pb || D.of) tabs.push(['rec','🛠 Recovery']);
-  if (D.eu) tabs.push(['eu','🇪🇺 EU']);
-  if (D.firmware) tabs.push(['fw','⚙️ Firmware']);
+  const tabs = [['info','ℹ️ Info'],['roms','📦 ROMs'],['rec','🛠 Recovery'],['fw','⚙️ Firmware']];
   $('#shTabs').innerHTML = tabs.map(([k,l],i)=>`<button class="tab${i?'':' on'}" data-k="${k}">${l}</button>`).join('');
   $('#shTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { hap('soft');
     $('#shTabs').querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===b)); show(b.dataset.k); });
@@ -277,35 +274,48 @@ function romList(rows){
       <div class="m">Android ${esc(r.android)} • ${esc(r.size||'-')} • ${esc(r.date||'-')}</div>${btn('⬇️ Download',r.link)}</div>`; });
   return out;
 }
-function show(k){
-  const b = $('#shBody'); let h = '';
+const fwList = rows => rows.map(f=>`<div class="item"><div class="t"><span class="tag ${/stable/i.test(f.branch)?'st':'wk'}">${esc(f.branch)}</span>${esc(f.miui)}</div>
+  <div class="m">${f.region?esc(f.region)+' • ':''}${esc(f.date)}</div>${btn('⬇️ Download',f.link)}</div>`).join('');
+function recHtml(R){
+  let h='';
+  if (R.twrp) h += `<div class="item"><div class="t">TWRP</div><div class="m">${esc(R.twrp.file)} • ${esc(R.twrp.size)} • ${esc(R.twrp.date)}</div>${btn('⬇️ Download',R.twrp.url)}${btn('All builds',R.twrp.page,true)}</div>`;
+  if (R.pitchblack) h += `<div class="item"><div class="t">PitchBlack</div><div class="m">${esc(R.pitchblack.file)}</div>${btn('⬇️ Download',R.pitchblack.url)}${btn('All builds',R.pitchblack.page,true)}</div>`;
+  if (R.orangefox) h += `<div class="item"><div class="t">OrangeFox 🦊</div><div class="m">${esc(R.orangefox.name)}${R.orangefox.maintainer?' • by '+esc(R.orangefox.maintainer):''}</div>`
+    + (R.orangefox.downloads||[]).map(x=>btn('⬇️ '+esc(x.type),x.url)).join('') + btn('OrangeFox page',R.orangefox.page,true) + '</div>';
+  if (R.eu && (R.eu.stable||R.eu.weekly)){
+    h += '<div class="sec">Xiaomi.eu ROM</div>';
+    if (R.eu.stable) h += `<div class="item"><div class="t"><span class="tag st">Stable</span></div><div class="m">${esc(R.eu.stable.file)}</div>${btn('⬇️ Download',R.eu.stable.url)}</div>`;
+    if (R.eu.weekly) h += `<div class="item"><div class="t"><span class="tag wk">Weekly</span></div><div class="m">${esc(R.eu.weekly.file)}</div>${btn('⬇️ Download',R.eu.weekly.url)}</div>`;
+  }
+  return h || '<div class="empty">Is device ke liye recovery / EU build nahi mila 🤷</div>';
+}
+async function show(k){
+  curTab = k; const b = $('#shBody'); let h = '';
   if (k==='info'){
-    if (D.specs){ h += `<div class="sec">Specs — ${esc(D.specs.name)}</div>` + D.specs.rows.map(([a,v])=>`<div class="row"><span>${esc(a)}</span><span>${esc(v)}</span></div>`).join('');
-      h += '<div style="height:12px"></div>' + btn('GSMArena page',D.specs.url,true); }
-    else h += '<div class="empty">Is device ke specs available nahi hain.</div>';
-    if (D.models) h += `<div class="sec">Model numbers (${esc(D.models.internal)})</div>` + D.models.models.map(m=>`<div class="row"><span>${esc(m.model)}</span><span>${esc(m.name)}</span></div>`).join('');
+    (D.specs||[]).slice(0,1).forEach(s => { h += `<div class="sec">Specs — ${esc(s.name)}</div>` + s.rows.map(r=>`<div class="row"><span>${esc(r.k)}</span><span>${esc(r.v)}</span></div>`).join('')
+      + '<div style="height:12px"></div>' + btn('GSMArena page',s.url,true); });
+    if (!(D.specs||[]).length) h += '<div class="empty">Is device ke specs available nahi hain.</div>';
+    if ((D.models||[]).length) h += '<div class="sec">Model numbers</div>' + D.models.map(m=>`<div class="row"><span>${esc(m.model)}</span><span>${esc(m.name)}</span></div>`).join('');
   }
   if (k==='roms'){
-    h += `<div class="sec">Recovery ROMs</div>` + romList(D.roms.recovery);
-    if (D.roms.fastboot && D.roms.fastboot.length) h += `<div class="sec">Fastboot ROMs</div>` + romList(D.roms.fastboot);
-    h += `<div class="sec">Archive</div>` + btn('MIUI archive',D.archive.miui,true) + btn('HyperOS archive',D.archive.hyperos,true);
-  }
-  if (k==='rec'){
-    if (D.twrp) h += `<div class="item"><div class="t">TWRP</div><div class="m">${esc(D.twrp.file)} • ${esc(D.twrp.size)} • ${esc(D.twrp.date)}</div>${btn('⬇️ Download',D.twrp.link)}${btn('All builds',D.twrp.page,true)}</div>`;
-    if (D.pb) h += `<div class="item"><div class="t">PitchBlack</div><div class="m">${esc(D.pb.file)}</div>${btn('⬇️ Download',D.pb.link)}</div>`;
-    if (D.of) h += `<div class="item"><div class="t">OrangeFox 🦊</div><div class="m">${esc(D.of.name)}${D.of.maintainer?' • by '+esc(D.of.maintainer):''}</div>` +
-      D.of.builds.map(x=>btn('⬇️ '+esc(x.type),x.url)).join('') + btn('OrangeFox page',D.of.page,true) + '</div>';
-  }
-  if (k==='eu'){
-    h += `<div class="sec">${esc(D.eu.name)}</div>`;
-    if (D.eu.stable) h += `<div class="item"><div class="t"><span class="tag st">Stable</span></div><div class="m">${esc(D.eu.stable.file)}</div>${btn('⬇️ Download',D.eu.stable.link)}</div>`;
-    if (D.eu.weekly) h += `<div class="item"><div class="t"><span class="tag wk">Weekly</span></div><div class="m">${esc(D.eu.weekly.file)}</div>${btn('⬇️ Download',D.eu.weekly.link)}</div>`;
-    if (!D.eu.stable && !D.eu.weekly) h += '<div class="empty">Abhi koi build nahi 🤷</div>';
+    h += `<div class="sec">Recovery ROMs</div>` + romList(D.recovery);
+    if ((D.fastboot||[]).length) h += `<div class="sec">Fastboot ROMs</div>` + romList(D.fastboot);
+    h += `<div class="sec">Archive</div>` + btn('MIUI archive',D.links.miui,true) + btn('HyperOS archive',D.links.hyperos,true);
   }
   if (k==='fw'){
-    h += D.firmware.map(f=>`<div class="item"><div class="t"><span class="tag ${f.branch==='stable'?'st':'wk'}">${esc(f.branch)}</span>${esc(f.miui)}</div>
-      <div class="m">${esc(f.region||'')} • Android ${esc(f.android||'-')} • ${esc(f.date)}</div>${btn('⬇️ Download',f.link)}</div>`).join('');
-    h += '<div class="empty" style="padding:8px">Note: firmware data upstream me 2024 tak ka hai.</div>';
+    h += '<div class="sec">Firmware</div>' + ((D.firmware||[]).length ? fwList(D.firmware) : '<div class="empty">Firmware nahi mila 🤷</div>');
+    if ((D.vendor||[]).length) h += '<div class="sec">Vendor</div>' + fwList(D.vendor);
+    h += btn('Firmware page',D.links.firmware,true) + btn('Vendor page',D.links.vendor,true);
+    h += '<div class="empty" style="padding:8px">Note: firmware/vendor data upstream me purana hai.</div>';
+  }
+  if (k==='rec'){
+    if (!REC){
+      b.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel"></div>';
+      const cn = curCn;
+      try { const r = await api('/api/xiaomi/recoveries/'+encodeURIComponent(cn)); if (cn!==curCn) return; REC = r; }
+      catch(e){ if (cn===curCn && curTab==='rec') b.innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`; return; }
+    }
+    if (curTab!=='rec') return; h = recHtml(REC);
   }
   b.innerHTML = h; b.scrollTop = 0;
 }
