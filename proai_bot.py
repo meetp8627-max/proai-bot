@@ -27,8 +27,8 @@ log = logging.getLogger("proai")
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 AI_MODEL = os.environ.get("AI_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
-MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "55"))
-MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "5500"))
+MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "40"))
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
 TEMPERATURE = float(os.environ.get("AI_TEMPERATURE", "0.6"))
 BASE_URL = (os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
 
@@ -523,4 +523,301 @@ async def clearrules(update, ctx):
 # ───────────────────────── Notes & Filters ─────────────────────────
 @group_admin("can_change_info")
 async def save(update, ctx):
-    msg = upda
+    msg = update.message
+    args = ctx.args or []
+    if not args:
+        return await msg.reply_text("Use: /save name text  (ya kisi message pe reply karke /save name)")
+    name = args[0].lower().lstrip("#")
+    content = (msg.reply_to_message.text if msg.reply_to_message and msg.reply_to_message.text
+               else " ".join(args[1:]))
+    if not content:
+        return await msg.reply_text("Note ka text bhi do 📝")
+    db_set(update.effective_chat.id, f"note:{name}", content)
+    await msg.reply_text(f"✅ Note <code>#{html.escape(name)}</code> save ho gaya", parse_mode=ParseMode.HTML)
+
+
+async def get_note(update, ctx):
+    if not ctx.args:
+        return await update.message.reply_text("Use: /get name")
+    n = db_get(update.effective_chat.id, f"note:{ctx.args[0].lower().lstrip('#')}")
+    await update.message.reply_text(n if n else "Aisa koi note nahi mila 🤷")
+
+
+async def notes(update, ctx):
+    ks = db_keys(update.effective_chat.id, "note:")
+    await update.message.reply_text(
+        "📝 Notes:\n" + "\n".join(f"#{k}" for k in ks) if ks else "Abhi koi note save nahi hai.")
+
+
+@group_admin("can_change_info")
+async def clear_note(update, ctx):
+    if not ctx.args:
+        return await update.message.reply_text("Use: /clear name")
+    db_del(update.effective_chat.id, f"note:{ctx.args[0].lower().lstrip('#')}")
+    await update.message.reply_text("🗑 Note delete")
+
+
+@group_admin("can_change_info")
+async def add_filter(update, ctx):
+    msg = update.message
+    args = ctx.args or []
+    if len(args) < 2:
+        return await msg.reply_text("Use: /filter keyword reply text")
+    db_set(update.effective_chat.id, f"filter:{args[0].lower()}", " ".join(args[1:]))
+    await msg.reply_text(f"✅ Filter <code>{html.escape(args[0].lower())}</code> set",
+                         parse_mode=ParseMode.HTML)
+
+
+async def list_filters(update, ctx):
+    ks = db_keys(update.effective_chat.id, "filter:")
+    await update.message.reply_text(
+        "🔎 Filters:\n" + "\n".join(f"• {k}" for k in ks) if ks else "Abhi koi filter nahi hai.")
+
+
+@group_admin("can_change_info")
+async def stop_filter(update, ctx):
+    if not ctx.args:
+        return await update.message.reply_text("Use: /stop keyword")
+    db_del(update.effective_chat.id, f"filter:{ctx.args[0].lower()}")
+    await update.message.reply_text("🛑 Filter hata diya")
+
+
+async def group_triggers(update, ctx):
+    """Group me #note aur filter keywords."""
+    chat, text = update.effective_chat, update.effective_message.text or ""
+    if chat.type == "private":
+        return
+    for tag in re.findall(r"#(\w+)", text):
+        n = db_get(chat.id, f"note:{tag.lower()}")
+        if n:
+            return await update.effective_message.reply_text(n)
+    low = text.lower()
+    for kw in db_keys(chat.id, "filter:"):
+        if re.search(rf"\b{re.escape(kw)}\b", low):
+            return await update.effective_message.reply_text(db_get(chat.id, f"filter:{kw}"))
+
+
+# ───────────────────────── AI chat ─────────────────────────
+SEARCH_TOOL = [{"type": "function", "function": {
+    "name": "web_search",
+    "description": "Internet pe search karo. Latest/current info ke liye use karo (naye products, news, prices, scores, weather).",
+    "parameters": {"type": "object",
+                   "properties": {"query": {"type": "string", "description": "Chhoti specific search query, English me best"}},
+                   "required": ["query"]}}}]
+tools_ok = True
+
+
+def clean(text):
+    return re.sub(r"<think>.*?</think>", "", text or "", flags=re.S).strip()
+
+
+async def complete(messages, tools=False, max_tokens=None):
+    kw = dict(model=AI_MODEL, messages=messages, max_tokens=max_tokens or MAX_TOKENS,
+              temperature=TEMPERATURE, top_p=0.95)
+    if tools:
+        kw.update(tools=SEARCH_TOOL, tool_choice="auto")
+    return (await ai.chat.completions.create(**kw)).choices[0].message
+
+
+async def ai_reply(cid, text) -> str:
+    """AI ka jawab + zaroorat pe web search (Telegram chat + Mini App dono yahi use karte hain)."""
+    global tools_ok
+    history[cid].append({"role": "user", "content": text})
+    sources, reply, extra = [], None, []
+    try:
+        for _ in range(4):
+            msgs = [{"role": "system", "content": build_system_prompt()}, *history[cid], *extra]
+            try:
+                m = await complete(msgs, tools=tools_ok)
+            except Exception as e:
+                if tools_ok and "tool" in str(e).lower():
+                    log.warning("Endpoint tools support nahi karta, search off: %s", e)
+                    tools_ok = False
+                    continue
+                raise
+            calls = m.tool_calls or []
+            if not calls:
+                reply = clean(m.content)
+                break
+            extra.append({"role": "assistant", "content": m.content or "", "tool_calls": [
+                {"id": c.id, "type": "function",
+                 "function": {"name": c.function.name, "arguments": c.function.arguments}} for c in calls]})
+            for c in calls:
+                try:
+                    q = json.loads(c.function.arguments or "{}").get("query", "")
+                    rows = await search.web_search(q)
+                    sources += rows
+                    out = search.format_for_llm(rows) or "Koi result nahi mila."
+                except Exception as e:
+                    log.exception("search fail")
+                    out = f"Search fail hua: {e}"
+                extra.append({"role": "tool", "tool_call_id": c.id, "content": out})
+        if reply is None:  # tool loop me atak gaya: bina tools ke final jawab
+            m = await complete([{"role": "system", "content": build_system_prompt()}, *history[cid], *extra])
+            reply = clean(m.content)
+        reply = reply or "..."
+        history[cid].append({"role": "assistant", "content": reply})
+        if sources:
+            reply += search.format_sources(sources)
+    except Exception as e:
+        log.exception("AI error")
+        history[cid].pop()
+        reply = f"⚠️ AI error: {e}"
+    return reply
+
+
+async def llm(system, user, max_tokens=900):
+    """Ek-baar ka jawab (history ke bina)."""
+    m = await complete([{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens=max_tokens)
+    return clean(m.content) or "..."
+
+
+async def send_long(msg, text):
+    """Telegram 4096 chars se lamba message nahi leta, to tukdon me bhejo."""
+    opts = LinkPreviewOptions(is_disabled=True)
+    for i in range(0, len(text), 4000):
+        await msg.reply_text(text[i:i + 4000], link_preview_options=opts)
+
+
+def reset_history(cid):
+    history[cid].clear()
+
+
+async def chat(update, ctx):
+    msg, chat_obj = update.message, update.effective_chat
+    text = msg.text
+    if chat_obj.type != "private":
+        mention = f"@{ctx.bot.username}".lower()
+        replied_to_bot = (msg.reply_to_message and msg.reply_to_message.from_user
+                          and msg.reply_to_message.from_user.id == ctx.bot.id)
+        if mention not in text.lower() and not replied_to_bot:
+            return
+        text = re.sub(re.escape(mention), "", text, flags=re.I).strip() or "hi"
+        text = f"{update.effective_user.first_name}: {text}"
+
+    await ctx.bot.send_chat_action(chat_obj.id, ChatAction.TYPING)
+    reply = await ai_reply(chat_obj.id, text)
+    await send_long(msg, reply)
+
+
+# ───────────────────────── Smart tools ─────────────────────────
+async def ask_cmd(update, ctx):
+    msg = update.message
+    q = " ".join(ctx.args or []) or (msg.reply_to_message.text if msg.reply_to_message and msg.reply_to_message.text else "")
+    if not q:
+        return await msg.reply_text("Use: /ask <sawaal>  (ya kisi message pe reply karke /ask)")
+    cid = update.effective_chat.id
+    if update.effective_chat.type != "private":
+        q = f"{update.effective_user.first_name}: {q}"
+    await ctx.bot.send_chat_action(cid, ChatAction.TYPING)
+    await send_long(msg, await ai_reply(cid, q))
+
+
+async def _search_answer(update, ctx, q, news):
+    msg = update.message
+    await ctx.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+    try:
+        rows = await search.web_search(q, news=news)
+    except Exception as e:
+        return await msg.reply_text(f"⚠️ Search nahi ho paya: {e}")
+    if not rows:
+        return await msg.reply_text("Kuch nahi mila 🤷 Dusre words try karo.")
+    sys = (persona() + "Neeche web search ke results diye hain. Sirf inhi ke basis pe jawab do, "
+           "[1], [2] jaise numbers se source batao. Result me jawab na ho to saaf bolo.")
+    ans = await llm(sys, f"Sawaal: {q}\n\nSearch results:\n{search.format_for_llm(rows)}")
+    await send_long(msg, ans + search.format_sources(rows))
+
+
+async def search_cmd(update, ctx):
+    q = " ".join(ctx.args or [])
+    if not q:
+        return await update.message.reply_text("Use: /search <kya dhundhna hai>")
+    await _search_answer(update, ctx, q, news=False)
+
+
+async def news_cmd(update, ctx):
+    topic = " ".join(ctx.args or []) or "India"
+    await _search_answer(update, ctx, f"latest news {topic}", news=True)
+
+
+async def tldr(update, ctx):
+    r = update.message.reply_to_message
+    text = (r.text or r.caption) if r else None
+    if not text:
+        return await update.message.reply_text("Jis message ka summary chahiye uspe reply karke /tldr likho 📝")
+    await ctx.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+    out = await llm(persona() + "Neeche ke text ka 3-5 bullet points me chhota summary do. Sirf text ke basis pe.", text[:12000])
+    await send_long(update.message, out)
+
+
+async def translate(update, ctx):
+    msg, args = update.message, list(ctx.args or [])
+    r = msg.reply_to_message
+    if r and (r.text or r.caption):
+        lang, text = (args[0] if args else "English"), (r.text or r.caption)
+    elif len(args) >= 2:
+        lang, text = args[0], " ".join(args[1:])
+    else:
+        return await msg.reply_text("Use: /translate hindi <text>  (ya message pe reply karke /translate hindi)")
+    await ctx.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+    out = await llm(f"Tum translator ho. Text ko {lang} me translate karo. Sirf translation likho, aur kuch nahi.", text[:6000])
+    await send_long(msg, out)
+
+
+# ───────────────────────── Setup ─────────────────────────
+async def post_init(app):
+    await app.bot.set_my_commands([
+        BotCommand("ask", "AI se poocho"), BotCommand("search", "Web search + jawab"), BotCommand("news", "Latest news"),
+        BotCommand("tldr", "Message ka summary"), BotCommand("translate", "Translate karo"),
+        BotCommand("app", "ProAI Mini App kholo"), BotCommand("help", "Saare commands"), BotCommand("id", "User/chat ID"),
+        BotCommand("rules", "Group rules"), BotCommand("notes", "Saved notes"),
+        BotCommand("filters", "Active filters"), BotCommand("warns", "Warns check"),
+        BotCommand("admins", "Admin list"), BotCommand("ping", "Bot alive?"),
+        BotCommand("recovery", "MIUI/HyperOS recovery ROM"), BotCommand("twrp", "TWRP download"),
+        BotCommand("codename", "Device name se codename"), BotCommand("specs", "Device specs"),
+        BotCommand("reset", "AI chat reset"),
+    ])
+
+
+async def on_error(update, ctx):
+    log.error("Handler error: %r", ctx.error)
+
+
+def main():
+    builder = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init)
+    if BASE_URL:
+        builder = builder.updater(None)  # webhook Starlette server khud handle karega
+    app = builder.build()
+    cmds = {
+        "start": start, "help": help_cmd, "ask": ask_cmd, "search": search_cmd, "news": news_cmd,
+        "tldr": tldr, "translate": translate, "app": app_cmd, "reset": reset, "ping": ping, "id": id_cmd,
+        "info": info, "admins": admins, "adminlist": admins,
+        "ban": ban, "tban": ban, "unban": unban, "kick": kick, "kickme": kickme,
+        "mute": mute, "tmute": mute, "unmute": unmute,
+        "warn": warn, "unwarn": unwarn, "resetwarns": resetwarns, "warns": warns,
+        "setwarnlimit": setwarnlimit, "pin": pin, "unpin": unpin, "del": delete, "purge": purge,
+        "setwelcome": setwelcome, "welcome": welcome, "resetwelcome": resetwelcome,
+        "setrules": setrules, "rules": rules, "clearrules": clearrules,
+        "save": save, "get": get_note, "notes": notes, "clear": clear_note,
+        "filter": add_filter, "filters": list_filters, "stop": stop_filter,
+    }
+    for name, fn in cmds.items():
+        app.add_handler(CommandHandler(name, fn))
+    xiaomi.register(app, db_get, db_set)
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_members))
+    text = filters.TEXT & ~filters.COMMAND & filters.UpdateType.MESSAGE  # edited messages ignore
+    app.add_handler(MessageHandler(text, group_triggers), group=1)
+    app.add_handler(MessageHandler(text, chat), group=2)
+    app.add_error_handler(on_error)
+
+    if BASE_URL:
+        import uvicorn
+        import webapp
+        web = webapp.create_app(BOT_TOKEN, app, ai_reply, reset_history, BASE_URL, post_init)
+        uvicorn.run(web, host="0.0.0.0", port=int(os.environ.get("PORT", "10000")), log_level="info")
+    else:
+        app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
